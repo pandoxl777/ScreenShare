@@ -9,7 +9,14 @@ if (-not ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdenti
     Exit
 }
 
+# Caminho do relatório
 $outputPath = "$env:LOCALAPPDATA\Temp\Relatorio_SS_Elite.txt"
+
+# [CORREÇÃO] Remove o arquivo antigo para o Windows não bugar o encoding do novo
+if (Test-Path $outputPath) { 
+    Remove-Item $outputPath -Force -ErrorAction SilentlyContinue 
+}
+
 $lines = @()
 
 # Cabeçalho
@@ -47,7 +54,7 @@ foreach ($conn in $connections) {
 }
 $lines += ""
 
-# 3. Arquivos Modificados (Focado na Temp para evitar poluição de cache de navegador)
+# 3. Arquivos Modificados (Apenas na Temp para evitar sobrecarga)
 $lines += "3. ARQUIVOS MODIFICADOS NAS ULTIMAS 2 HORAS (PASTA TEMP)"
 $lines += "---------------------------------------------------"
 $twoHoursAgo = (Get-Date).AddHours(-2)
@@ -69,7 +76,6 @@ foreach ($p in $processes) {
     try { if ($p.MainModule.FileName) { $pPath = $p.MainModule.FileName } } catch {}
     
     if ($pPath -and ($pPath -like "*\AppData\*" -or $pPath -like "*\Temp\*")) {
-        # Whitelist do Spotify legítimo
         if ($pPath -notlike "*\AppData\Roaming\Spotify\*") {
             $alerts += "[ALERTA] Processo em pasta suspeita: $($p.Name) -> Caminho: $pPath"
         }
@@ -77,19 +83,17 @@ foreach ($p in $processes) {
 }
 
 if ($alerts.Count -gt 0) {
-    $lines += "⚠️ ATENCAO: Foram detectados indicios suspeitos!"
+    $lines += "ATENCAO: Foram detectados indicios suspeitos!"
     $lines += "---------------------------------------------------"
     foreach ($alert in $alerts) { $lines += $alert }
 } else {
     $lines += "Nenhum indicio grave detectado automaticamente nos caminhos de execucao."
 }
 
-# =========================================================================
-# SALVAMENTO SALVA-VIDAS: Força o UTF-8 com BOM nativo do PowerShell
-# =========================================================================
-$lines | Out-File -FilePath $outputPath -Encoding utf8
+# Salva usando criptografia pura do sistema para evitar herança de lixo
+[System.IO.File]::WriteAllLines($outputPath, $lines, [System.Text.Encoding]::UTF8)
 
-# Mensagem de sucesso e abertura do Bloco de Notas
+# Mensagens de finalização
 Write-Host ""
 Write-Host "=======================================================" -ForegroundColor Cyan
 Write-Host " [!] INVESTIGACAO CONCLUIDA COM SUCESSO! " -ForegroundColor Green
