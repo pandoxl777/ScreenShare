@@ -1,70 +1,105 @@
-$output = "$env:TEMP\Relatorio_SS_Elite.txt";      
-"===================================================" > $output;
-"       RELATORIO DE INVESTIGACAO - STAFF FIVEM     " >> $output;
-"===================================================" >> $output;
-" Desenvolvido por: Jhon" >> $output;
-" Data/Hora: $(Get-Date -Format 'dd/MM/yyyy HH:mm:ss')" >> $output;
-"===================================================" >> $output;
-"" >> $output;
-"1. PROCESSOS SUSPEITOS OU ATIVOS" >> $output;
-"---------------------------------------------------" >> $output;
-$processos = Get-Process | Select-Object Name, Id, @{Name='Path';Expression={$_.Path}}
-$processos | Out-String -Width 300 >> $output;
-"" >> $output;
-"2. CONEXOES DE REDE ATIVAS (IPs E PORTAS)" >> $output;
-"---------------------------------------------------" >> $output;
-Get-NetTCPConnection -State Established -ErrorAction SilentlyContinue | Select-Object LocalAddress, LocalPort, RemoteAddress, RemotePort, OwningProcess | Out-String -Width 300 >> $output;
-"" >> $output;
-"3. ARQUIVOS MODIFICADOS NAS ULTIMAS 2 HORAS (TEMP/APPDATA)" >> $output;
-"---------------------------------------------------" >> $output;
-$arquivosRecentes = Get-ChildItem -Path "$env:TEMP", "$env:APPDATA\CitizenFX" -Recurse -ErrorAction SilentlyContinue | Where-Object { $_.LastWriteTime -gt (Get-Date).AddHours(-2) -and !$_.PSIsContainer }
-$arquivosRecentes | Select-Object LastWriteTime, Name, FullName | Out-String -Width 300 >> $output;
-"" >> $output;
-"4. DIAGNOSTICO AUTOMATICO DE SUSPEITAS" >> $output;
-"---------------------------------------------------" >> $output;
+# =========================================================================
+# VALIDAÇÃO DE ADMINISTRADOR - Bloqueia a execução se não tiver privilégios
+# =========================================================================
+if (-not ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
+    Clear-Host
+    Write-Warning "========================================================="
+    Write-Warning " ERRO: O script PRECISA ser executado como Administrador!"
+    Write-Warning " Por favor, abra o PowerShell como Admin e tente rodar denovo."
+    Write-Warning "========================================================="
+    Exit
+}
 
-# Lista de termos suspeitos comuns em SS de FiveM
-$termosSuspeitos = @("cheat", "hack", "injector", "injetor", "bypass", "modmenu", "eulen", "vape", "skript", "trigger", "aimbot", "macro", "recoil")
-$suspeitosEncontrados = @()
+# Configuração do caminho do arquivo de saída temporário
+$outputPath = "$env:LOCALAPPDATA\Temp\Relatorio_SS_Elite.txt"
+$report = New-Object System.Text.StringBuilder
 
-# 1. Varre os arquivos recentes em busca dos termos
-if ($arquivosRecentes) {
-    foreach ($arq in $arquivosRecentes) {
-        foreach ($termo in $termosSuspeitos) {
-            if ($arq.Name -like "*$termo*") {
-                $suspeitosEncontrados += "[ALERTA ARQUIVO] Nome suspeito modificado recentemente: $($arq.FullName)"
-            }
+# =========================================================================
+# CABEÇALHO DO RELATÓRIO
+# =========================================================================
+$null = $report.AppendLine("===================================================")
+$null = $report.AppendLine("       RELATORIO DE INVESTIGACAO - STAFF FIVEM     ")
+$null = $report.AppendLine("===================================================")
+$null = $report.AppendLine(" Desenvolvido por: Jhon")
+$null = $report.AppendLine(" Data/Hora: $((Get-Date).ToString('dd/MM/yyyy HH:mm:ss'))")
+$null = $report.AppendLine("===================================================")
+$null = $report.AppendLine("")
+
+# =========================================================================
+# 1. PROCESSOS SUSPEITOS OU ATIVOS
+# =========================================================================
+$null = $report.AppendLine("1. PROCESSOS SUSPEITOS OU ATIVOS")
+$null = $report.AppendLine("---------------------------------------------------")
+# Puxa o caminho dos processos tratando erros de acessos nativos do Windows
+$processes = Get-Process -ErrorAction SilentlyContinue | Select-Object Name, Id, @{Name="Path"; Expression={$_._Path; if(-not $_._Path){$_.MainModule.FileName}}} -ErrorAction SilentlyContinue | Sort-Object Name
+$processText = $processes | Out-String
+$null = $report.AppendLine($processText)
+$null = $report.AppendLine("")
+
+# =========================================================================
+# 2. CONEXÕES DE REDE ATIVAS (IPs E PORTAS)
+# =========================================================================
+$null = $report.AppendLine("2. CONEXOES DE REDE ATIVAS (IPs E PORTAS)")
+$null = $report.AppendLine("---------------------------------------------------")
+$connections = Get-NetTCPConnection -State Established -ErrorAction SilentlyContinue | Select-Object LocalAddress, LocalPort, RemoteAddress, RemotePort, OwningProcess
+foreach ($conn in $connections) {
+    $null = $report.AppendLine("LocalAddress  : $($conn.LocalAddress)")
+    $null = $report.AppendLine("LocalPort     : $($conn.LocalPort)")
+    $null = $report.AppendLine("RemoteAddress : $($conn.RemoteAddress)")
+    $null = $report.AppendLine("RemotePort    : $($conn.RemotePort)")
+    $null = $report.AppendLine("OwningProcess : $($conn.OwningProcess)")
+    $null = $report.AppendLine("")
+}
+$null = $report.AppendLine("")
+
+# =========================================================================
+# 3. ARQUIVOS MODIFICADOS NAS ÚLTIMAS 2 HORAS
+# =========================================================================
+$null = $report.AppendLine("3. ARQUIVOS MODIFICADOS NAS ULTIMAS 2 HORAS (TEMP/APPDATA)")
+$null = $report.AppendLine("---------------------------------------------------")
+$twoHoursAgo = (Get-Date).AddHours(-2)
+$files = Get-ChildItem -Path "$env:LOCALAPPDATA\Temp", "$env:APPDATA" -File -Recurse -ErrorAction SilentlyContinue | 
+         Where-Object { $_.LastWriteTime -gt $twoHoursAgo } | 
+         Select-Object LastWriteTime, Name, FullName | Sort-Object LastWriteTime
+$filesText = $files | Out-String
+$null = $report.AppendLine($filesText)
+$null = $report.AppendLine("")
+
+# =========================================================================
+# 4. DIAGNÓSTICO AUTOMÁTICO DE SUSPEITAS (Com Whitelist do Spotify)
+# =========================================================================
+$null = $report.AppendLine("4. DIAGNOSTICO AUTOMATICO DE SUSPEITAS")
+$null = $report.AppendLine("---------------------------------------------------")
+
+$alerts = @()
+foreach ($p in $processes) {
+    if ($p.Path) {
+        # Alerta se rodar da AppData ou Temp, mas IGNORA se for o Spotify legítimo
+        if (($p.Path -like "*\AppData\*" -or $p.Path -like "*\Temp\*") -and ($p.Path -notlike "*\AppData\Roaming\Spotify\*")) {
+            $alerts += "[ALERTA LOCALIZACAO] Processo rodando de pasta temporaria: $($p.Name) -> Caminho: $($p.Path)"
         }
     }
 }
 
-# 2. Varre os processos ativos em busca de termos ou caminhos suspeitos
-if ($processos) {
-    foreach ($p in $processos) {
-        # Verifica se o nome do processo é suspeito
-        foreach ($termo in $termosSuspeitos) {
-            if ($p.Name -like "*$termo*") {
-                $suspeitosEncontrados += "[ALERTA PROCESSO] Processo suspeito ativo: $($p.Name) (ID: $($p.Id))"
-            }
-        }
-        # Verifica se o processo está rodando oculto na Temp ou AppData (comum em cheats disfarçados)
-        if ($p.Path -and ($p.Path -like "*$env:TEMP*" -or $p.Path -like "*$env:APPDATA*")) {
-            $suspeitosEncontrados += "[ALERTA LOCALIZACAO] Processo rodando de pasta temporaria: $($p.Name) -> Caminho: $($p.Path)"
-        }
-    }
-}
-
-# Escreve o veredito no relatório
-if ($suspeitosEncontrados.Count -gt 0) {
-    "⚠️ ATENCAO: Foram detectados indicios suspeitos no PC do usuario!" >> $output;
-    "---------------------------------------------------" >> $output;
-    foreach ($alerta in $suspeitosEncontrados) {
-        $alerta >> $output
+if ($alerts.Count -gt 0) {
+    $null = $report.AppendLine("⚠️ ATENCAO: Foram detectados indicios suspeitos no PC do usuario!")
+    $null = $report.AppendLine("---------------------------------------------------")
+    foreach ($alert in $alerts) {
+        $null = $report.AppendLine($alert)
     }
 } else {
-    "✅ NENHUM ARQUIVO OU PROCESSO SUSPEITO DETECTADO AUTOMATICAMENTE." >> $output;
-    "Nota: Lembre-se de revisar os processos e conexoes manualmente!" >> $output;
+    $null = $report.AppendLine("Nenhum indicio grave detectado automaticamente nos caminhos de execucao.")
 }
 
-"" >> $output;
-notepad.exe $output
+# =========================================================================
+# SALVAMENTO E FINALIZAÇÃO
+# =========================================================================
+$report.ToString() | Out-File -FilePath $outputPath -Encoding utf8
+
+# Exibe confirmação no terminal do Staff e abre o bloco de notas automaticamente
+Write-Host ""
+Write-Host "=======================================================" -ForegroundColor Cyan
+Write-Host " [!] INVESTIGACAO CONCLUIDA COM SUCESSO! " -ForegroundColor Green
+Write-Host " O relatório completo foi aberto no Bloco de Notas." -ForegroundColor White
+Write-Host "=======================================================" -ForegroundColor Cyan
+notepad.exe $outputPath
