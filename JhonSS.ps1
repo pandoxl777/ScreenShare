@@ -24,8 +24,8 @@ $lines += ""
 # 1. Processos
 $lines += "1. PROCESSOS SUSPEITOS OU ATIVOS"
 $lines += "---------------------------------------------------"
-$lines += "Pid      Name                     Path"
-$lines += "---      ----                     ----"
+$lines += "{0,-8} {1,-25} {2}" -f "PID", "Nome do Processo", "Caminho do Executavel"
+$lines += "{0,-8} {1,-25} {2}" -f "---", "----------------", "---------------------"
 
 $processes = Get-Process -ErrorAction SilentlyContinue | Sort-Object Name
 foreach ($p in $processes) {
@@ -34,8 +34,7 @@ foreach ($p in $processes) {
         if ($p.MainModule.FileName) { $pPath = $p.MainModule.FileName }
     } catch {}
     
-    # Formata a linha como texto simples para evitar objetos complexos no relatório
-    $lines += "{0,-8} {1,-24} {2}" -f $p.Id, $p.Name, $pPath
+    $lines += "{0,-8} {1,-25} {2}" -f $p.Id, $p.Name, $pPath
 }
 $lines += ""
 
@@ -44,15 +43,15 @@ $lines += "2. CONEXOES DE REDE ATIVAS (IPs E PORTAS)"
 $lines += "---------------------------------------------------"
 $connections = Get-NetTCPConnection -State Established -ErrorAction SilentlyContinue
 foreach ($conn in $connections) {
-    $lines += "Processo ID: $($conn.OwningProcess) | Local: $($conn.LocalAddress):$($conn.LocalPort) -> Remoto: $($conn.RemoteAddress):$($conn.RemotePort)"
+    $lines += "PID: $($conn.OwningProcess) | Local: $($conn.LocalAddress):$($conn.LocalPort) -> Remoto: $($conn.RemoteAddress):$($conn.RemotePort)"
 }
 $lines += ""
 
-# 3. Arquivos Modificados (Apenas listagem de TEXTO dos nomes, sem ler o interior deles)
-$lines += "3. ARQUIVOS MODIFICADOS NAS ULTIMAS 2 HORAS (TEMP/APPDATA)"
+# 3. Arquivos Modificados (Focado na Temp para evitar poluição de cache de navegador)
+$lines += "3. ARQUIVOS MODIFICADOS NAS ULTIMAS 2 HORAS (PASTA TEMP)"
 $lines += "---------------------------------------------------"
 $twoHoursAgo = (Get-Date).AddHours(-2)
-$files = Get-ChildItem -Path "$env:LOCALAPPDATA\Temp", "$env:APPDATA" -File -Recurse -ErrorAction SilentlyContinue | 
+$files = Get-ChildItem -Path "$env:LOCALAPPDATA\Temp" -File -Recurse -ErrorAction SilentlyContinue | 
          Where-Object { $_.LastWriteTime -gt $twoHoursAgo } | Sort-Object LastWriteTime
 
 foreach ($f in $files) {
@@ -70,9 +69,9 @@ foreach ($p in $processes) {
     try { if ($p.MainModule.FileName) { $pPath = $p.MainModule.FileName } } catch {}
     
     if ($pPath -and ($pPath -like "*\AppData\*" -or $pPath -like "*\Temp\*")) {
-        # Whitelist do Spotify legítimo para não poluir o relatório
+        # Whitelist do Spotify legítimo
         if ($pPath -notlike "*\AppData\Roaming\Spotify\*") {
-            $alerts += "[ALERTA] Processo em pasta temporaria: $($p.Name) -> Caminho: $pPath"
+            $alerts += "[ALERTA] Processo em pasta suspeita: $($p.Name) -> Caminho: $pPath"
         }
     }
 }
@@ -86,14 +85,14 @@ if ($alerts.Count -gt 0) {
 }
 
 # =========================================================================
-# SALVAMENTO COMPATÍVEL (Força UTF-8 sem bugs do pipeline do PS 5.1)
+# SALVAMENTO SALVA-VIDAS: Força o UTF-8 com BOM nativo do PowerShell
 # =========================================================================
-[System.IO.File]::WriteAllLines($outputPath, $lines, [System.Text.Encoding]::UTF8)
+$lines | Out-File -FilePath $outputPath -Encoding utf8
 
 # Mensagem de sucesso e abertura do Bloco de Notas
 Write-Host ""
 Write-Host "=======================================================" -ForegroundColor Cyan
 Write-Host " [!] INVESTIGACAO CONCLUIDA COM SUCESSO! " -ForegroundColor Green
-Write-Host " O relatório limpo foi aberto no Bloco de Notas." -ForegroundColor White
+Write-Host " O relatorio limpo foi aberto no Bloco de Notas." -ForegroundColor White
 Write-Host "=======================================================" -ForegroundColor Cyan
 notepad.exe $outputPath
